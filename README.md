@@ -17,7 +17,7 @@ In the kernel directory, copy and modify any files that are needed:
   - (DONE)- string.c (no changes)
   - (DONE)- spinlock.c (no changes)
   - (DONE)- kalloc.c (no changes)
-proc.c: this is the fun one!
+- proc.c: this is the fun one!
   - delete proc_mapstacks, but first copy the code that allocates a physical stack page and transfer it to procinit, where you should use it to allocate a physical stack page for each process instead of using KSTACK to point it to the stack page that proc_mapstacks would have set up
   - delete any code related to trap frames, page tables, freeing processes, anything userspace, anything designed to service system calls, sleeping and waking up, etc.
   - set up some kernel threads in userinit. instead of crafting one userspace process, allocate several processes and make them runnable (delete anything related to trapframes, the user address space, cwd, etc.)
