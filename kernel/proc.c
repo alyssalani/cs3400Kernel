@@ -30,21 +30,8 @@ struct spinlock wait_lock;
 // Map it high in memory, followed by an invalid
 // guard page.
 void
-proc_mapstacks(pagetable_t kpgtbl)
-{
-  struct proc *p;
-  
-  for(p = proc; p < &proc[NPROC]; p++) {
-    char *pa = kalloc();
-    if(pa == 0)
-      panic("kalloc");
-    uint64 va = KSTACK((int) (p - proc));
-    kvmmap(kpgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-  }
-}
 
 // initialize the proc table.
-void
 procinit(void)
 {
   struct proc *p;
@@ -137,7 +124,6 @@ found:
   }
 
   // An empty user page table.
-  p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
     freeproc(p);
     release(&p->lock);
@@ -195,13 +181,6 @@ growproc(int n)
   struct proc *p = myproc();
 
   sz = p->sz;
-  if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
-      return -1;
-    }
-  } else if(n < 0){
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
-  }
   p->sz = sz;
   return 0;
 }
@@ -221,11 +200,6 @@ fork(void)
   }
 
   // Copy user memory from parent to child.
-  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
-    freeproc(np);
-    release(&np->lock);
-    return -1;
-  }
   np->sz = p->sz;
 
   // copy saved user registers.
@@ -237,8 +211,6 @@ fork(void)
   // increment reference counts on open file descriptors.
   for(i = 0; i < NOFILE; i++)
     if(p->ofile[i])
-      np->ofile[i] = filedup(p->ofile[i]);
-  np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 
@@ -286,15 +258,10 @@ exit(int status)
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
     if(p->ofile[fd]){
-      struct file *f = p->ofile[fd];
-      fileclose(f);
       p->ofile[fd] = 0;
     }
   }
 
-  begin_op();
-  iput(p->cwd);
-  end_op();
   p->cwd = 0;
 
   acquire(&wait_lock);
@@ -323,25 +290,22 @@ int
 wait(uint64 addr)
 {
   struct proc *pp;
-  int havekids, pid;
+  int pid;
   struct proc *p = myproc();
 
   acquire(&wait_lock);
 
   for(;;){
     // Scan through table looking for exited children.
-    havekids = 0;
     for(pp = proc; pp < &proc[NPROC]; pp++){
       if(pp->parent == p){
         // make sure the child isn't still in exit() or swtch().
         acquire(&pp->lock);
 
-        havekids = 1;
         if(pp->state == ZOMBIE){
           // Found one.
           pid = pp->pid;
-          if(addr != 0 && copyout(p->pagetable, addr, (char *)&pp->xstate,
-                                  sizeof(pp->xstate)) < 0) {
+          {
             release(&pp->lock);
             release(&wait_lock);
             return -1;
@@ -356,11 +320,6 @@ wait(uint64 addr)
     }
 
     // No point waiting if we don't have any children.
-    if(!havekids || killed(p)){
-      release(&wait_lock);
-      return -1;
-    }
-    
     // Wait for a child to exit.
     sleep(p, &wait_lock);  //DOC: wait-sleep
   }
@@ -456,11 +415,51 @@ forkret(void)
     // regular process (e.g., because it calls sleep), and thus cannot
     // be run from main().
     first = 0;
-    fsinit(ROOTDEV);
   }
 
-  usertrapret();
 }
+
+void
+userinit(void)
+{
+  // Thread 1
+  struct proc *p;
+
+  p = allocproc();
+  initproc = p;
+
+  // Thread 2
+  struct proc *m;
+
+  m = allocproc();
+  initproc = m;
+
+  // Thread 3
+  struct proc *b;
+
+  b = allocproc();
+  initproc = b;
+  
+  // allocate one user page and copy initcode's instructions
+  // and data into it.
+  p->sz = PGSIZE;
+  m->sz = PGSIZE;
+  b->sz = PGSIZE;
+  // prepare for the very first "return" from kernel to user.
+
+  safestrcpy(p->name, "initcode", sizeof(p->name));
+  safestrcpy(m->name, "initcode", sizeof(m->name));
+  safestrcpy(b->name, "initcode", sizeof(b->name));
+
+  p->state = RUNNABLE;
+  m->state = RUNNABLE;
+  b->state = RUNNABLE;
+
+  release(&p->lock);
+  release(&m->lock);
+  release(&b->lock);
+}
+
 
 // Atomically release lock and sleep on chan.
 // Reacquires lock when awakened.
@@ -560,13 +559,8 @@ killed(struct proc *p)
 int
 either_copyout(int user_dst, uint64 dst, void *src, uint64 len)
 {
-  struct proc *p = myproc();
-  if(user_dst){
-    return copyout(p->pagetable, dst, src, len);
-  } else {
-    memmove((char *)dst, src, len);
-    return 0;
-  }
+  memmove((char *)dst, src, len);
+  return 0;
 }
 
 // Copy from either a user address, or kernel address,
@@ -575,13 +569,8 @@ either_copyout(int user_dst, uint64 dst, void *src, uint64 len)
 int
 either_copyin(void *dst, int user_src, uint64 src, uint64 len)
 {
-  struct proc *p = myproc();
-  if(user_src){
-    return copyin(p->pagetable, dst, src, len);
-  } else {
-    memmove(dst, (char*)src, len);
-    return 0;
-  }
+  memmove(dst, (char*)src, len);
+  return 0;
 }
 
 // Print a process listing to console.  For debugging.
@@ -612,4 +601,15 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+void                                                                                                      
+do_my_bidding(void)
+{
+    for (;;) {
+        int cid = cpuid();                                                                                
+        struct proc *proc = myproc();                                                                     
+        printf("Running proc %d on cpu %d\n", proc->pid, cid);                                            
+        yield();                                                                                          
+    } 
 }

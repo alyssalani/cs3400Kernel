@@ -53,7 +53,7 @@ void
 uartinit(void)
 {
   // disable interrupts.
-  WriteReg(IER, 0x00);
+  // WriteReg(IER, 0x00);
 
   // special mode to set baud rate.
   WriteReg(LCR, LCR_BAUD_LATCH);
@@ -72,7 +72,7 @@ uartinit(void)
   WriteReg(FCR, FCR_FIFO_ENABLE | FCR_FIFO_CLEAR);
 
   // enable transmit and receive interrupts.
-  WriteReg(IER, IER_TX_ENABLE | IER_RX_ENABLE);
+  // WriteReg(IER, IER_TX_ENABLE | IER_RX_ENABLE);
 
   initlock(&uart_tx_lock, "uart");
 }

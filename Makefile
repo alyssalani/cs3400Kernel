@@ -13,7 +13,7 @@ OBJS = \
   $K/main.o \
   $K/proc.o \
   $K/swtch.o \
-  $K/trampoline.o \
+  # $K/trampoline.o \
   $K/trap.o \
   $K/syscall.o \
   $K/sysproc.o \
