@@ -26,6 +26,16 @@ static void freeproc(struct proc *p);
 // must be acquired before any p->lock.
 struct spinlock wait_lock;
 
+void                                                                                                      
+do_my_bidding(void)
+{
+  for (;;) {
+    int cid = cpuid();                                                                                
+    struct proc *proc = myproc();                                                                     
+    printf("Running proc %d on cpu %d\n", proc->pid, cid);                                            
+    yield();                                                                                          
+  } 
+}
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
 // guard page.
@@ -39,15 +49,15 @@ procinit(void)
   initlock(&pid_lock, "nextpid");
   initlock(&wait_lock, "wait_lock");
   for(p = proc; p < &proc[NPROC]; p++) {
+      char *pa = kalloc();
+      if(pa == 0)
+        panic("kalloc");
       initlock(&p->lock, "proc");
       p->state = UNUSED;
-
-      char *pa = kalloc();
-      if (pa == 0)
-          panic("kalloc");
       p->kstack = (uint64)pa;
   }
 }
+
 
 // Must be called with interrupts disabled,
 // to prevent race with process being moved
@@ -101,10 +111,10 @@ static struct proc*
 allocproc(void)
 {
   struct proc *p;
-
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == UNUSED) {
+      printf("found unused\n");
       goto found;
     } else {
       release(&p->lock);
@@ -115,20 +125,6 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
-
-  // Allocate a trapframe page.
-  if((p->trapframe = (struct trapframe *)kalloc()) == 0){
-    freeproc(p);
-    release(&p->lock);
-    return 0;
-  }
-
-  // An empty user page table.
-  if(p->pagetable == 0){
-    freeproc(p);
-    release(&p->lock);
-    return 0;
-  }
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
@@ -336,6 +332,7 @@ void
 scheduler(void)
 {
   struct proc *p;
+  struct proc *m;
   struct cpu *c = mycpu();
   
   c->proc = 0;
@@ -358,6 +355,23 @@ scheduler(void)
         c->proc = 0;
       }
       release(&p->lock);
+    }
+    for(m = proc; m < &proc[NPROC]; m++) {
+      acquire(&m->lock);
+      if(m->state == RUNNABLE) {
+        printf("Among us \n ");
+        // Switch to chosen process.  It is the process's job
+        // to release its lock and then reacquire it
+        // before jumping back to us.
+        m->state = RUNNING;
+        c->proc = m;
+        swtch(&c->context, &m->context);
+
+        // Process is done running for now.
+        // It should have changed its p->state before coming back.
+        c->proc = 0;
+      }
+      release(&m->lock);
     }
   }
 }
@@ -405,59 +419,26 @@ yield(void)
 void
 forkret(void)
 {
-  static int first = 1;
-
+  printf("amongus");
   // Still holding p->lock from scheduler.
   release(&myproc()->lock);
 
-  if (first) {
-    // File system initialization must be run in the context of a
-    // regular process (e.g., because it calls sleep), and thus cannot
-    // be run from main().
-    first = 0;
-  }
+  do_my_bidding();
 
 }
 
+// Should be a loop that jus calls allocproc
 void
 userinit(void)
 {
-  // Thread 1
   struct proc *p;
-
-  p = allocproc();
-  initproc = p;
-
-  // Thread 2
-  struct proc *m;
-
-  m = allocproc();
-  initproc = m;
-
-  // Thread 3
-  struct proc *b;
-
-  b = allocproc();
-  initproc = b;
-  
-  // allocate one user page and copy initcode's instructions
-  // and data into it.
-  p->sz = PGSIZE;
-  m->sz = PGSIZE;
-  b->sz = PGSIZE;
-  // prepare for the very first "return" from kernel to user.
-
-  safestrcpy(p->name, "initcode", sizeof(p->name));
-  safestrcpy(m->name, "initcode", sizeof(m->name));
-  safestrcpy(b->name, "initcode", sizeof(b->name));
-
-  p->state = RUNNABLE;
-  m->state = RUNNABLE;
-  b->state = RUNNABLE;
-
-  release(&p->lock);
-  release(&m->lock);
-  release(&b->lock);
+  for(int i = 0; i < 13; i++) {
+    p = allocproc();
+    initproc = p;
+    safestrcpy(p->name, "initcode", sizeof(p->name));
+    p->state = RUNNABLE;
+    release(&p->lock);
+  }
 }
 
 
@@ -601,15 +582,4 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
-}
-
-void                                                                                                      
-do_my_bidding(void)
-{
-    for (;;) {
-        int cid = cpuid();                                                                                
-        struct proc *proc = myproc();                                                                     
-        printf("Running proc %d on cpu %d\n", proc->pid, cid);                                            
-        yield();                                                                                          
-    } 
 }
