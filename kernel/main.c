@@ -17,13 +17,9 @@ main()
     printf("xv6 kernel is booting\n");
     printf("\n");
     kinit();         // physical page allocator
-    printf("here-1\n");
     procinit();      // process table
-    printf("here0\n");
     userinit();
-    printf("here1\n");
     __sync_synchronize();
-    printf("here2\n");
     started = 1;
   } else {
     while(started == 0)

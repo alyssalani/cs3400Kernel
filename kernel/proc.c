@@ -114,7 +114,6 @@ allocproc(void)
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == UNUSED) {
-      printf("found unused\n");
       goto found;
     } else {
       release(&p->lock);
@@ -359,7 +358,6 @@ scheduler(void)
     for(m = proc; m < &proc[NPROC]; m++) {
       acquire(&m->lock);
       if(m->state == RUNNABLE) {
-        printf("Among us \n ");
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
@@ -419,7 +417,6 @@ yield(void)
 void
 forkret(void)
 {
-  printf("amongus");
   // Still holding p->lock from scheduler.
   release(&myproc()->lock);
 
